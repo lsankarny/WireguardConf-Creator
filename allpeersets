@@ -1,0 +1,10 @@
+#HEADER|Network|Server1|Server2
+wgnetwork1|router|vps1
+wgnetwork1|router|qotom1
+wgnetwork1|router|Perseus
+wgnetwork1|router|kali
+wgnetwork1|vps1|qotom1
+wgnetwork1|vps1|kali
+wgnetwork1|Perseus|kali
+wgnetwork2|router|vps1
+wgnetwork2|ryzenium|vps1

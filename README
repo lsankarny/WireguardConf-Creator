@@ -1,0 +1,10 @@
+Look at the allelements and allpeersets files for example of starting configs
+
+usage :   ./wgmakeconf stripcomments
+                stripcomments is optional. If it is not blank/missing, all omments will be stripped out
+
+  src       : contains 'source' w/g files (from original dump)
+  split     : will contain files split from the source ones 
+  local     : store the "mid" versions that are local to this server
+  dst       : will contain final wg conf files for usage in /etc/wireguard
+

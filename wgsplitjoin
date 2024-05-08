@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+#  Wireguard config file aggregator
+#
+# wgmake takes 1 parameter : stripcomments switch
+#    ./wgmake anystring
+#    if anystring="" then comments will be sent out. Else they'll be suppressed
+#
+#  scans all files in $SRCDIR ... then splits them to $SPLITDIR
+#     finally joins them to $DSTDIR ... 
+#         if a file (with the correct .mid name) exists in $LOCALDIR, it'll be used
+#
+# the split/join is done by $WGCOMMANDFILE
+#
+CURDIR="$(dirname $(realpath $0))"
+SRCDIR="$CURDIR/src"
+DSTDIR="$CURDIR/dst"
+SPLITDIR="$CURDIR/split"
+LOCALDIR="$CURDIR/local"
+FLIST="$(ls $SRCDIR/)"
+WGCOMMANDFILE="$CURDIR/wgcmds"
+
+STRIPCOMMENTS=$1
+echo "      Current Directory = " $CURDIR
+echo "      Source  Directory = " $SRCDIR
+echo "      Destin  Directory = " $DSTDIR
+echo "      Split   Directory = " $SPLITDIR
+echo "      Local   Directory = " $LOCALDIR
+echo "      Strip   Comments  = " $(if [ "$STRIPCOMMENTS" = "" ]; then echo "NO"; else echo "YES"; fi)
+echo ""
+echo "      Files to process  = " $FLIST
+echo ""
+
+
+for fl in $FLIST
+do
+    srcfile="$(realpath $SRCDIR/$fl)"
+    $WGCOMMANDFILE split $srcfile $SPLITDIR
+
+    wgf="$(basename $fl)"
+    topfile="$SPLITDIR/${wgf}.top" 
+    midfile="$SPLITDIR/${wgf}.mid"
+    botfile="$SPLITDIR/${wgf}.bot" 
+    # check if a mid file exists in the local directory
+    if [ -f "$LOCALDIR/${wgf}.mid" ]
+    then midfile="$LOCALDIR/${wgf}.mid"
+    fi
+
+    printf "      starting $fl ... using $midfile ... "
+    # join them
+    outfile="$DSTDIR/$wgf"
+    $WGCOMMANDFILE join $topfile $midfile $botfile $outfile $STRIPCOMMENTS
+    echo "just did $wgf"
+
+done
+echo "ALL DONE!"

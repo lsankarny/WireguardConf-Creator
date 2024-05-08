@@ -1,0 +1,390 @@
+#!/bin/bash
+#
+#
+
+function Usage {
+    echo "******************************************************************************************"
+    echo " Usage :  "
+    echo "         $0 split/join/create p1 p2 p3 p4 p5"
+    echo ""
+    echo "         split :  p1 = name of wireguard conf file (WITH extension)"
+    echo "                  p2 = (optional) ... destination directory for output"
+    echo "                       output files created with .top, .mid and .bot extensions"
+    echo ""
+    echo "                       E.g. wgconf split mywgintfc"
+    echo ""
+    echo "         join  :  p1 = top_filename"
+    echo "                  p2 = mid_filename"
+    echo "                  p3 = bot_filename"
+    echo "                  p4 = outfilename"
+    echo "                  p5 = (optional) ... any string will trigger comments to be stripped"
+    echo ""
+    echo "         CreateFromElementFile:  "
+    echo "                  p1 = elementfile with data for creation"
+    echo ""
+    echo "         CreateElements:  "
+    echo "                  p1 = allelementfile with all server/network data for creation of elementfiles"
+    echo "                        ... all element files will be created and also process using 'createfromelementfile'"
+    echo ""
+    echo "         CreateConfigs   :  "
+    echo "                  p1 = allpeersets with all network/server1/server2 data for creation of conf files"
+    echo "                        ... all element files MUST EXIST FIRST!!! "
+    echo ""
+    echo "******************************************************************************************"
+}
+
+function main {
+if grep -q -i "split" <<< "$1" 
+then
+    Split $@
+elif grep -q -i "join" <<< "$1" 
+then
+    Join $@
+elif grep -q -i "CreateFromElementFile" <<< "$1" 
+then
+    CreateFromElementFile $2
+elif grep -q -i "CreateElements" <<< "$1" 
+then
+    printf "Creating elements ..."
+    CreateElements $2
+    echo "done."
+elif grep -q -i "CreateConfigs" <<< "$1" 
+then
+    printf "Creating configs ..."
+    CreateConfigs $2
+    echo "done."
+else
+    echo "Unknown option ... "; Usage ; exit 1
+fi
+}
+
+
+function Split {
+    #
+    # function to split a wireguard .conf file 
+    # into a "top", "mid" and "bot" sections
+    # top = private ; mid = PostUp/Down ; bot = public peer info
+    #
+    #
+    #
+
+    local FSRC="$2"
+    if [ ! -f $FSRC ]; then echo "Source file $FSRC is missing" ; exit 1 ; fi
+
+    # set output directory
+    local OUTDIR="."
+    if [ ! "$3" = "" ]; then OUTDIR="$3"; fi
+
+    if [ ! -d $OUTDIR ] ; then mkdir -p $OUTDIR ; fi
+
+    # get basename of source file
+    local FBASE=$(basename $FSRC)
+    local FTOP="$OUTDIR/${FBASE}.top"
+    local FMID="$OUTDIR/${FBASE}.mid"
+    local FBOT="$OUTDIR/${FBASE}.bot"
+
+    # clear the files we will be writing to
+    printf "" > $FTOP
+    printf "" > $FMID
+    printf "" > $FBOT
+    # start off at the top ...
+    local outfil=$FTOP
+    local dumpfil=$outfil
+    while IFS= read -r line
+    do
+        # first instance of [Peer] will reset the output file
+        if grep -q "\[Peer\]" <<< "$line"; then outfil=$FBOT ; fi
+        # ... but if the interface section comes after a few peers, we need to reset the file again
+        if grep -q "\[Interface\]" <<< "$line"; then outfil=$FTOP ; fi
+
+        # set the file to send the line to ...
+        dumpfil=$outfil
+
+        # check if it is a PostUp/PostDown command --- those are server specific
+        if grep -q "PostUp" <<< "$line"; then dumpfil=$FMID ; fi
+        if grep -q "PostDown" <<< "$line"; then dumpfil=$FMID ; fi
+
+        # write the line out
+        echo -e "$line" >> $dumpfil
+    done < "$FSRC"
+
+}
+
+function Join {
+    #
+    # Just cats the 3 pieces to an output
+    #
+    if [ ! -f $2 ]; then echo "TOP file $2 missing"; exit 1; fi
+    if [ ! -f $3 ]; then echo "MID file $3 missing"; exit 1; fi
+    if [ ! -f $4 ]; then echo "BOT file $4 missing"; exit 1; fi
+    if [ "$5" = "" ]; then echo "OUTPUT FILE!!!???!?"; exit 1; fi
+    echo -e "# Wireguard config file generated on $(date)" > $5
+    cat $2 $3 $4 >> $5
+    stripM $5       # remove any ^M characters ..."
+    if [ ! "$6" = "" ] # any string triggers comments to be stripped
+    then stripComments $5 ; fi
+}
+
+function CreateFromElementFile {
+    #
+    # An "ElementFile" is a file for a server/network combination.
+    #  It contains the variables such as ListenPort, etc
+    #  using the ElementFile, this function generates the private and public segments
+    # the first parameter is the element file
+    # if a PrivateKey is missing in the file, a new one will be generated and the element file will be updated
+    #
+    if [ "$1" = "" ]; then echo "OPTIONS FILE!!!???!?"; exit 1; fi
+    # remove any ^M characters ... these cause headaches
+    stripM $1 ; source $1
+
+    if [ "$Server" = "" ] || [ "$Network" = "" ]; then echo "Server or Network missing"; exit 1 ; fi
+    #echo Server = $Server
+    #echo Network = $Network
+    #echo Address = $Address
+    # split $Address via "," and put into an array = ADRS
+    IFS=',' read -ra ADRS <<< "${Address## }"
+    local outdir=$(dirname $(realpath $1))
+    local privfile="$outdir/${Server}.${Network}.priv"
+    local midfile="$outdir/${Server}.${Network}.mid"
+    local pubfile="$outdir/${Server}.${Network}.pub"
+
+    echo "# created at $(date)" > $privfile
+    echo "# created at $(date)" > $pubfile
+    echo "[Interface]" >> $privfile
+    if [ "$PrivateKey" = "" ]; then 
+        PrivateKey=$(wg genkey) 
+        # strip all spaces
+        PrivateKey=${PrivateKey// }
+        # store it in the source file for next time ...
+        echo "PrivateKey=\"$PrivateKey\"" >> $1
+    fi
+    echo "PrivateKey = $PrivateKey" >> $privfile
+    echo "Address    = $Address   " >> $privfile
+    if [ ! "$ListenPort" = "" ]; then echo "ListenPort = $ListenPort" >> $privfile; fi
+    echo "SaveConfig = False"        >> $privfile
+
+    if [ ! "$Table"      = "" ]; then 
+        echo "Table      = $Table     " >> $privfile 
+        for a in ${ADRS[@]}; do 
+            echo "PostUp     = ip rule add from $(getNetwork $a) lookup $Table" >> $midfile
+            echo "PostDown   = ip rule del from $(getNetwork $a) lookup $Table" >> $midfile
+        done
+        CommonMid $midfile
+    fi
+
+
+    echo "[Peer]" >> $pubfile
+    echo "#  $Server on $Network" >> $pubfile
+    PublicKey=$(echo $PrivateKey | wg pubkey)
+    echo "PublicKey           = $PublicKey" >> $pubfile
+    if [ ! "$Location"   = "" ]; then echo "Endpoint            = ${Location}:$ListenPort"   >> $pubfile; fi
+    if [ ! "$PersistentKeepAlive"   = "" ]; then echo "PersistentKeepAlive = $PersistentKeepAlive"   >> $pubfile; fi
+
+    AllowedIPs=$AdditionalRoutes
+    for a in "${ADRS[@]}"; do 
+        if [ "$AllowedIPs" = "" ]
+        then
+            AllowedIPs="$(getAddress $a)/32"
+        else
+            AllowedIPs="$AllowedIPs, $(getAddress $a)/32"
+        fi
+    done
+    echo "AllowedIPs          = $AllowedIPs" >> $pubfile
+}
+
+function CreateElements {
+    #
+    # Starts with a multi-line "allelements" file with info for each server/network 
+    #  each server/network is on a single line :
+    #
+    #  Network,Server,Address,ListenPort,AdditionalRoutes,Location,PersistentKeepAlive,Table
+    #
+
+    infile=$1
+    stripM $infile
+    curdir=$(dirname $(realpath $infile))
+    elementdir=$curdir/elements
+    if [ ! -d $elementdir ] ; then mkdir -p $elementdir; fi
+
+    # make a temp file to store versions with new/changed keys
+    tmpinfile=$(mktemp)
+    newkeymade=""
+
+    while IFS= read -r line
+    do
+        if grep -q "^#" <<< $line  
+        then 
+            i=1 # do nothing
+        else 
+            IFS='|' read -ra ADRS <<< "$line"
+
+            Network=${ADRS[0]}
+            Server=${ADRS[1]}
+            Address=${ADRS[2]}
+            ListenPort=${ADRS[3]}
+            AdditionalRoutes=${ADRS[4]}
+            Location=${ADRS[5]}
+            PersistentKeepAlive=${ADRS[6]}
+            Table=${ADRS[7]}
+            PrivateKey=${ADRS[8]}
+
+            if [ "$PrivateKey" = "" ]; then 
+                PrivateKey=$(wg genkey) 
+                # strip all spaces
+                PrivateKey=${PrivateKey// }
+                newkeymade="YES"
+                line="${line}|$PrivateKey" 
+            fi
+
+            outfil=$elementdir/${Server//\"}.${Network//\"}
+            echo "# Dump at $(date +%Y%m%d_%H.%M.%S)"  > $outfil
+            echo Network=$Network                           >> $outfil
+            echo Server=$Server                             >> $outfil
+            echo Address=$Address                           >> $outfil
+            echo ListenPort=$ListenPort                     >> $outfil
+            echo AdditionalRoutes=$AdditionalRoutes         >> $outfil
+            echo Location=$Location                         >> $outfil
+            echo PersistentKeepAlive=$PersistentKeepAlive   >> $outfil
+            echo Table=$Table                               >> $outfil
+            echo PrivateKey=$PrivateKey                     >> $outfil
+
+
+            #
+            # now that the elementfile is created, make the private and public parts of the conf file
+            CreateFromElementFile $outfil
+        fi
+
+        # update the temp file with any modifications
+        echo $line >> $tmpinfile
+
+    done < "$infile"
+    # if any keys were updated, update the input file
+    if [[ ! "$newkeymade" = "" ]]
+    then
+        mv $infile ${infile}.$(date +%Y%m%d_%H.%M.%S)
+        mv $tmpinfile $infile
+    else
+        rm $tmpinfile
+    fi
+
+}
+
+function CreateConfigs {
+    #
+    # Starts with a multi-line "allpeersets" file with info for each server/network 
+    #  each network/server1/server2 is on a single line :
+    #
+    #  Network|Server1|Server2|PresharedKey
+    #  if PresharedKey is missing, it will be generated and the new file saved
+    #
+
+    infile=$1
+    stripM $infile
+    curdir=$(dirname $(realpath $infile))
+    elementdir=$curdir/elements
+    localdir=$curdir/local
+    destindir=$curdir/dst
+    timestamp=$(date +%Y%m%d_%H.%M.%S)
+    if [ ! -d $destindir ] ; then mkdir -p $destindir; fi
+
+    # make a temp file to store versions with new/changed keys
+    tmpinfile=$(mktemp)
+    newkeymade=""
+
+    while IFS= read -r line
+    do
+        if grep -q "^#" <<< $line  
+        then 
+            i=1 # do nothing ... it's a comment line
+        else 
+            IFS='|' read -ra ADRS <<< "$line"
+
+            Network=${ADRS[0]}
+            Server1=${ADRS[1]}
+            Server2=${ADRS[2]}
+            PresharedKey=${ADRS[3]}
+
+            if [ "$PresharedKey" = "" ]; then 
+                PresharedKey=$(wg genpsk) 
+                # strip all spaces
+                PresharedKey=${PresharedKey// }
+                newkeymade="YES"
+                # add it to the line ... will be written to the tmpinfile
+                line="${line}|$PresharedKey" 
+            fi
+
+            # if a conf file does not already exist in the destination directory, start a new one for each server
+            if [ ! -f $destindir/${Server1}.${Network}.conf ] 
+            then
+                TOPFILE=$elementdir/${Server1}.${Network}.priv; if [ -f $localdir/${Server1}.${Network}.priv ]; then TOPFILE=$localdir/${Server1}.${Network}.priv; fi
+                # if a .priv file does not exist, it is FATAL
+                if [ ! -f $TOPFILE ]; then echo "File $TOPFILE missing!"; exit 1 ; fi
+                cat $TOPFILE > $destindir/${Server1}.${Network}.conf
+                # if a .mid file does not exist, it is ok
+                TOPFILE=$elementdir/${Server1}.${Network}.mid; if [ -f $localdir/${Server1}.${Network}.mid ]; then TOPFILE=$localdir/${Server1}.${Network}.mid; fi
+                if [ -f $TOPFILE ]; then cat $TOPFILE >> $destindir/${Server1}.${Network}.conf; fi
+            fi
+            if [ ! -f $destindir/${Server2}.${Network}.conf ] 
+            then
+                TOPFILE=$elementdir/${Server2}.${Network}.priv; if [ -f $localdir/${Server2}.${Network}.priv ]; then TOPFILE=$localdir/${Server2}.${Network}.priv; fi
+                # if a .priv file does not exist, it is FATAL
+                if [ ! -f $TOPFILE ]; then echo "File $TOPFILE missing!"; exit 1 ; fi
+                cat $TOPFILE > $destindir/${Server2}.${Network}.conf
+                # if a .mid file does not exist, it is ok
+                TOPFILE=$elementdir/${Server2}.${Network}.mid; if [ -f $localdir/${Server2}.${Network}.mid ]; then TOPFILE=$localdir/${Server2}.${Network}.mid; fi
+                if [ -f $TOPFILE ]; then cat $TOPFILE >> $destindir/${Server2}.${Network}.conf; fi
+            fi
+
+
+            if [ ! -f $elementdir/${Server1}.${Network}.pub ] ; then echo "File $elementdir/${Server1}.${Network}.pub missing!"; exit 1 ; fi
+            if [ ! -f $elementdir/${Server2}.${Network}.pub ] ; then echo "File $elementdir/${Server2}.${Network}.pub missing!"; exit 1 ; fi
+            cat $elementdir/${Server1}.${Network}.pub >> $destindir/${Server2}.${Network}.conf
+            cat $elementdir/${Server2}.${Network}.pub >> $destindir/${Server1}.${Network}.conf
+
+            echo "PresharedKey        = $PresharedKey"  >> $destindir/${Server1}.${Network}.conf
+            echo "PresharedKey        = $PresharedKey"  >> $destindir/${Server2}.${Network}.conf
+
+        fi
+
+        # update the temp file with any modifications
+        echo $line >> $tmpinfile
+
+    done < "$infile"
+    # if any keys were updated, update the input file
+    if [[ ! "$newkeymade" = "" ]]
+    then
+        mv $infile ${infile}.$timestamp
+        mv $tmpinfile $infile
+    else
+        rm $tmpinfile
+    fi
+
+}
+
+function CommonMid {
+    #
+    # write out a default mid file
+    #
+    echo "PostUp   = iptables -w 300 -A wgFORWARD -i %i -j ACCEPT; iptables -w 300 -A wgFORWARD -o %i -j ACCEPT" >> $1
+    echo "PostDown = iptables -w 300 -D wgFORWARD -i %i -j ACCEPT; iptables -w 300 -D wgFORWARD -o %i -j ACCEPT" >> $1
+    echo "PostUp   = iptables -w 300 -I wgFORWARD 1 -i %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> $1
+    echo "PostDown = iptables -w 300 -D wgFORWARD -i %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> $1
+    echo "PostUp   = iptables -w 300 -I wgFORWARD 1 -o %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> $1
+    echo "PostDown = iptables -w 300 -D wgFORWARD -o %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> $1
+    echo "#PostUp   = iptables -w 300 -t nat -A wgPOSTROUTING -o %i -j MASQUERADE" >> $1
+    echo "#PostDown = iptables -w 300 -t nat -D wgPOSTROUTING -o %i -j MASQUERADE" >> $1
+    echo "PostUp   = sysctl net.ipv4.conf.%i.forwarding=1" >> $1
+}
+
+function getAddress { echo $(ipcalc $1 | grep Address | awk '{print $2}'); }
+function getNetwork { echo $(ipcalc $1 | grep Network | awk '{print $2}'); }
+function stripM     { sed -i "s///g" $1; } # remove any ^M characters ... these cause headaches
+function stripComments {
+        # adapted from https://unix.stackexchange.com/questions/157328/how-can-i-remove-all-comments-from-a-file
+        local tmpout="$(mktemp)"
+        if [ -f $1 ] 
+        then grep -o '^[^#]*' $1 > $tmpout ; rm $1 ; mv $tmpout $1 ; fi
+}
+
+if [ ! "$UID" = "0" ]; then echo "MUST RUN $0 as ROOT"; exit 1; fi
+main "$@"

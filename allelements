@@ -1,0 +1,9 @@
+#HEADER|Network|Server|Address|ListenPort|AdditionalRoutes|Location|PersistentKeepAlive|Table
+"wgnetwork1"|"router"|"10.17.63.1/24, 172.20.32.1/24"|"51876"|"192.168.20.0/24,  0.0.0.0/0"|"router.mydomain.net"|"25"|"51876"
+"wgnetwork1"|"vps1"|"10.17.63.11/24, 172.20.32.11/24"|"51876"|""|"vps1.mydomain.net"|"25"|"51876"
+"wgnetwork1"|"qotom1"|"10.17.63.2/24, 172.20.32.2/24"|""|""|""|""|"51876"
+"wgnetwork1"|"Perseus"|"10.17.63.40/24, 172.20.32.40/24"|""|""|""|""|"51876"
+"wgnetwork1"|"kali"|"10.17.63.7/24, 172.20.32.7/24"|""|""|""|""|"51876"
+"wgnetwork2"|"router"|"10.91.22.1/24"|""|""|""|"25"|"51856"
+"wgnetwork2"|"vps1"|"10.91.22.11/24"|"51856"|"0.0.0.0/0"|"vps1.mydomain.net"|"25"|"51856"
+"wgnetwork2"|"ryzenium"|"10.91.22.6/24"|""|""|""|""|"51856"

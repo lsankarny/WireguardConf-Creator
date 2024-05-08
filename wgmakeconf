@@ -1,0 +1,36 @@
+#!/bin/bash
+#
+#  Wireguard config file aggregator
+#
+# wgmakeconf takes 1 parameter : stripcomments switch
+#    ./wgmakeconf anystring
+#    if anystring="" then comments will be sent out. Else they'll be suppressed
+#
+# Looks for allelements and allpeersets files 
+# the split/join is done by $WGCOMMANDFILE
+#
+CURDIR="$(dirname $(realpath $0))"
+WGCOMMANDFILE="$CURDIR/wgcmds"
+ALLELEMENTS="$CURDIR/allelements"
+ALLPEERSETS="$CURDIR/allpeersets"
+
+function main {
+    STRIPCOMMENTS=$1
+    $WGCOMMANDFILE CreateElements $ALLELEMENTS
+    $WGCOMMANDFILE CreateConfigs $ALLPEERSETS
+    if [ ! "$STRIPCOMMENTS" = "" ]; then
+        printf "stripping comments ..."
+        for f in $(find $CURDIR/dst/ -type f); do stripComments $f; done
+        echo "done."
+    fi
+    echo DONE!
+}
+
+function stripComments {
+        # adapted from https://unix.stackexchange.com/questions/157328/how-can-i-remove-all-comments-from-a-file
+        local tmpout="$(mktemp)"
+        if [ -f $1 ] 
+        then grep -o '^[^#]*' $1 > $tmpout ; rm $1 ; mv $tmpout $1 ; fi
+}
+
+main "$@"
